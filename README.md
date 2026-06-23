@@ -241,6 +241,12 @@ openclaw.cmd config set gateway.http.endpoints.chatCompletions.enabled true --st
 powershell -ExecutionPolicy Bypass -File .\scripts\setup-openclaw-weixin.ps1 -InstallPlugin
 ```
 
+应用家庭成员直聊安全配置：会话按微信账号隔离，私聊走 pairing，OpenClaw 工具权限收紧为聊天优先，不暴露文件、命令、浏览器、插件等工具组。
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-openclaw-family-chat.ps1
+```
+
 把 DeepSeek API key 放进 OpenClaw 本地环境文件，不要提交：
 
 ```powershell
@@ -271,10 +277,27 @@ powershell -ExecutionPolicy Bypass -File .\scripts\login-openclaw-weixin.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\openclaw-weixin-status.ps1
 ```
 
+### 家庭成员共享宠物 Agent 路线
+
+当前推荐先使用共享宠物 Agent：所有家庭成员都和同一只宠物人格互动，但 `session.dmScope=per-account-channel-peer` 会按微信账号、渠道和联系人隔离对话上下文，避免爸爸、妈妈的短期聊天历史串台。宠物的 `SOUL.md` 和长期家庭记忆仍然共享，这符合“全家共养一只 AI 宠”的 MVP 目标。
+
+家人接入有两种方式：
+
+1. 优先尝试在微信里打开已添加的 OpenClaw bot 联系人资料页，用微信自己的“推荐给朋友 / 分享名片 / 二维码名片”发给家人。不要分享 `openclaw channels login` 出来的登录二维码。
+2. 如果联系人名片不能分享或家人加不了，就在可信的 Windows 桌面 PowerShell 里再次运行 `login-openclaw-weixin.ps1`，让对应家人现场用自己的微信扫码确认。每扫码一次会增加一个 `openclaw-weixin` accountId，仍路由到共享的 `main` 宠物 Agent。
+
+多人接入后再次确认安全配置：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\scripts\configure-openclaw-family-chat.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\openclaw-weixin-status.ps1
+```
+
 让 `爸爸`、`妈妈` 分别给扫码后添加的 OpenClaw bot 账号发一条私聊。未知联系人第一次会进入 OpenClaw pairing，不会直接处理消息。列出 pending pairing 并审批：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\scripts\openclaw-weixin-status.ps1
+powershell -ExecutionPolicy Bypass -File .\scripts\list-openclaw-weixin-pairings.ps1
 powershell -ExecutionPolicy Bypass -File .\scripts\approve-openclaw-weixin-pairing.ps1 -Code <PAIRING_CODE>
 ```
 
@@ -285,6 +308,8 @@ powershell -ExecutionPolicy Bypass -File .\scripts\sync-openclaw-pet-persona.ps1
 ```
 
 重启 Gateway 后，再让已审批联系人发送一句轻量测试消息，例如“猫咪你在干嘛”。确认回复风格稳定后再继续长期运行。
+
+如果后续发现 `USER.md`、`IDENTITY.md` 或 workspace 记忆把爸爸、妈妈互相覆盖，再切换到独立 Agent 路线：为每个家庭成员创建独立 Agent 和 workspace，再把同一份宠物 `SOUL.md` 同步到各自 workspace；家庭共同事件和宠物健康记录仍交给 Bridge/RAG 统一维护。
 
 ## 6. 真实微信号单聊上线流程
 

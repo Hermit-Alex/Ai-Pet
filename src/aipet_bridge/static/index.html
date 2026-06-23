@@ -153,6 +153,19 @@
     }
     .hidden { display: none; }
     .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    .notice {
+      border: 1px solid #b9d8d2;
+      background: #eef8f6;
+      color: #18534e;
+      border-radius: 8px;
+      padding: 10px 12px;
+      margin-bottom: 16px;
+      line-height: 1.5;
+    }
+    .paused {
+      border-style: dashed;
+      background: #fbfcfd;
+    }
     @media (max-width: 900px) {
       .bar { flex-direction: column; align-items: flex-start; }
       .grid, .row { grid-template-columns: 1fr; }
@@ -204,6 +217,7 @@
     </section>
 
     <section id="view-wechat" class="view hidden">
+      <div class="notice">当前 Milestone 聚焦私聊自动回复：只处理 allowlist 联系人，群聊监听和群聊发送暂停。</div>
       <div class="grid">
         <div>
           <div class="panel">
@@ -217,20 +231,6 @@
             </div>
             <div class="checks">
               <label><input type="checkbox" id="emergency-stop"> Emergency stop</label>
-            </div>
-          </div>
-
-          <div class="panel">
-            <h2>Group Settings</h2>
-            <div class="row">
-              <div><label>Group allowlist</label><textarea id="wechat-groups" placeholder="One group per line"></textarea></div>
-              <div><label>Group interval minutes</label><input id="rate-minutes" type="number" min="1" max="1440" value="5"></div>
-              <div><label>Group daily limit</label><input id="daily-limit" type="number" min="1" max="300" value="30"></div>
-            </div>
-            <div class="checks">
-              <label><input type="checkbox" id="require-mention" checked> Require mention</label>
-              <label><input type="checkbox" id="manual-review" checked> Manual review</label>
-              <label><input type="checkbox" id="auto-reply"> Group auto reply</label>
             </div>
           </div>
 
@@ -251,6 +251,21 @@
               <span class="status" id="wechat-status">idle</span>
             </div>
           </div>
+
+          <div class="panel paused">
+            <h2>Group Settings Paused</h2>
+            <p class="hint">群聊监听和群聊发送不进入当前 Milestone。这里保留配置字段，只用于后续恢复群聊方案时兼容已有数据。</p>
+            <div class="row">
+              <div><label>Group allowlist</label><textarea id="wechat-groups" placeholder="One group per line"></textarea></div>
+              <div><label>Group interval minutes</label><input id="rate-minutes" type="number" min="1" max="1440" value="5"></div>
+              <div><label>Group daily limit</label><input id="daily-limit" type="number" min="1" max="300" value="30"></div>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" id="require-mention" checked> Require mention</label>
+              <label><input type="checkbox" id="manual-review" checked> Manual review</label>
+              <label><input type="checkbox" id="auto-reply" disabled> Group auto reply paused</label>
+            </div>
+          </div>
         </div>
         <div class="panel">
           <h2>Settings Preview</h2>
@@ -260,20 +275,9 @@
     </section>
 
     <section id="view-test" class="view hidden">
+      <div class="notice">优先用 Private Reply Test 验证 OpenClaw 单聊链路。群聊测试仅保留为后续兼容入口。</div>
       <div class="grid">
         <div>
-          <div class="panel">
-            <h2>Group Reply Test</h2>
-            <div class="row">
-              <div><label>Group name</label><input id="test-group"></div>
-              <div><label>Sender name</label><input id="test-sender"></div>
-            </div>
-            <label>Message</label>
-            <textarea id="test-message" placeholder="@猫咪 你在干嘛"></textarea>
-            <div class="checks"><label><input type="checkbox" id="test-mentioned" checked> Mentioned</label></div>
-            <div class="actions"><button class="primary" id="generate-reply">Generate group reply</button></div>
-          </div>
-
           <div class="panel">
             <h2>Private Reply Test</h2>
             <div class="row">
@@ -283,6 +287,19 @@
             <label>Message</label>
             <textarea id="private-message" placeholder="猫咪你在干嘛"></textarea>
             <div class="actions"><button class="primary" id="generate-private-reply">Generate private reply</button></div>
+          </div>
+
+          <div class="panel paused">
+            <h2>Group Reply Test Paused</h2>
+            <p class="hint">群聊回复当前不作为 MVP 测试路径，只保留接口预览能力。</p>
+            <div class="row">
+              <div><label>Group name</label><input id="test-group"></div>
+              <div><label>Sender name</label><input id="test-sender"></div>
+            </div>
+            <label>Message</label>
+            <textarea id="test-message" placeholder="@猫咪 你在干嘛"></textarea>
+            <div class="checks"><label><input type="checkbox" id="test-mentioned" checked> Mentioned</label></div>
+            <div class="actions"><button id="generate-reply">Generate group reply preview</button></div>
           </div>
         </div>
         <div class="panel">
@@ -398,7 +415,7 @@
         $("wake-words").value = (s.wake_words || []).join("\n");
         $("require-mention").checked = !!s.require_mention;
         $("manual-review").checked = !!s.manual_review;
-        $("auto-reply").checked = !!s.auto_reply_enabled;
+        $("auto-reply").checked = false;
         $("private-auto-reply").checked = !!s.private_auto_reply_enabled;
         $("emergency-stop").checked = !!s.emergency_stop;
         $("quiet-start").value = s.quiet_hours_start || "23:00";
@@ -424,7 +441,7 @@
           wake_words: listValue("wake-words"),
           require_mention: $("require-mention").checked,
           manual_review: $("manual-review").checked,
-          auto_reply_enabled: $("auto-reply").checked,
+          auto_reply_enabled: false,
           private_auto_reply_enabled: $("private-auto-reply").checked,
           emergency_stop: $("emergency-stop").checked,
           quiet_hours_start: $("quiet-start").value,

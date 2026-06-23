@@ -15,6 +15,7 @@ __pycache__/
 .cache/
 .data/
 logs/
+.openclaw/
 
 # OS/editor
 .DS_Store

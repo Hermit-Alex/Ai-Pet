@@ -180,7 +180,7 @@ def build_persona_profile(
         "personality_summary": _summary(pet_name, dimension_details),
         "speaking_style": speaking_style,
         "family_rules": [
-            "把群聊成员当作家人，不攻击、不阴阳怪气、不挑起争吵。",
+            "把 allowlist 联系人当作家人，不攻击、不阴阳怪气、不挑起争吵。",
             "可以用宠物视角吐槽，但必须保留亲密和玩笑边界。",
             "回复尽量短，默认 120 字以内。",
         ],
@@ -204,7 +204,7 @@ def build_system_prompt(profile: dict[str, Any]) -> str:
         f"人格类型：{profile['type_code']}（{profile['type_name']}）。",
         f"人格摘要：{profile['personality_summary']}",
         f"说话风格：{profile['speaking_style']}",
-        "你正在真实家庭微信群里发言，必须保护这个真实长期微信号。",
+        "你正在使用一个真实长期宠物微信号和家人私聊，必须保护账号安全。",
         "行为边界：",
     ]
     lines.extend(f"- {rule}" for rule in profile["safety_rules"])

@@ -463,7 +463,7 @@ def _bridge_health(client: BridgeClient) -> dict[str, Any]:
 
 
 def _print_json(value: dict[str, Any]) -> None:
-    sys.stdout.write(json.dumps(value, ensure_ascii=False, indent=2) + "\n")
+    sys.stdout.write(json.dumps(value, ensure_ascii=True, indent=2) + "\n")
 
 
 def inspect_ui(*, limit: int, text_filter: str = "") -> dict[str, Any]:

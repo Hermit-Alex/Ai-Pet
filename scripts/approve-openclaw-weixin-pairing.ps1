@@ -1,5 +1,6 @@
 param(
-  [int]$Port = 18789
+  [Parameter(Mandatory = $true)]
+  [string]$Code
 )
 
 $ErrorActionPreference = "Stop"
@@ -7,4 +8,4 @@ $ErrorActionPreference = "Stop"
 $OpenClawEnv = & (Join-Path $PSScriptRoot "openclaw-env.ps1")
 $OpenClawCmd = $OpenClawEnv.OpenClawCmd
 
-& $OpenClawCmd gateway run --force --port $Port --bind loopback --compact
+& $OpenClawCmd pairing approve openclaw-weixin $Code

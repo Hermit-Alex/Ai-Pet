@@ -1,0 +1,523 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>AI Pet Console</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #fff;
+      --text: #20242a;
+      --muted: #657080;
+      --line: #dce1e8;
+      --accent: #0f766e;
+      --danger: #b3261e;
+      --warn: #8a6100;
+      --ok: #167349;
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-family: system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 14px;
+      letter-spacing: 0;
+    }
+    header {
+      position: sticky;
+      top: 0;
+      z-index: 2;
+      background: #fff;
+      border-bottom: 1px solid var(--line);
+    }
+    .bar {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 12px 18px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 16px;
+    }
+    h1 { margin: 0; font-size: 20px; }
+    nav { display: flex; gap: 6px; overflow-x: auto; }
+    .tab {
+      border: 1px solid transparent;
+      background: transparent;
+      color: var(--muted);
+      border-radius: 6px;
+      padding: 8px 10px;
+      cursor: pointer;
+      white-space: nowrap;
+    }
+    .tab.active {
+      color: var(--accent);
+      border-color: #b9d8d2;
+      background: #eef8f6;
+    }
+    main {
+      max-width: 1240px;
+      margin: 0 auto;
+      padding: 18px;
+    }
+    .grid {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) minmax(320px, 420px);
+      gap: 16px;
+      align-items: start;
+    }
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 16px;
+      margin-bottom: 16px;
+    }
+    h2 { margin: 0 0 12px; font-size: 17px; }
+    .row {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+    label { display: block; font-weight: 600; margin-bottom: 6px; }
+    input, textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      padding: 9px 10px;
+      background: #fff;
+      color: var(--text);
+      font: inherit;
+    }
+    textarea { min-height: 86px; resize: vertical; }
+    .checks {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+    .checks label {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      font-weight: 500;
+      margin: 0;
+    }
+    .checks input { width: auto; }
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-top: 12px;
+    }
+    button {
+      border: 1px solid var(--line);
+      background: #fff;
+      color: var(--text);
+      border-radius: 6px;
+      padding: 9px 12px;
+      cursor: pointer;
+      font: inherit;
+      min-height: 38px;
+    }
+    button.primary { background: var(--accent); color: #fff; border-color: var(--accent); }
+    button.danger { color: var(--danger); border-color: #efc1bd; background: #fff7f6; }
+    .status {
+      display: inline-flex;
+      min-height: 28px;
+      align-items: center;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #eef0f3;
+      color: var(--muted);
+      font-size: 12px;
+    }
+    .status.ok { background: #e8f5ee; color: var(--ok); }
+    .status.warn { background: #fff4d8; color: var(--warn); }
+    .status.danger { background: #fdecea; color: var(--danger); }
+    pre {
+      margin: 0;
+      white-space: pre-wrap;
+      overflow-wrap: anywhere;
+      background: #111820;
+      color: #e8edf4;
+      border-radius: 8px;
+      padding: 12px;
+      max-height: 520px;
+      overflow: auto;
+      font-size: 12px;
+      line-height: 1.5;
+    }
+    .hidden { display: none; }
+    .hint { color: var(--muted); font-size: 12px; line-height: 1.5; }
+    @media (max-width: 900px) {
+      .bar { flex-direction: column; align-items: flex-start; }
+      .grid, .row { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="bar">
+      <div>
+        <h1>AI Pet Console</h1>
+        <div class="hint" id="health-status">checking...</div>
+      </div>
+      <nav>
+        <button class="tab active" data-view="profile">Profile</button>
+        <button class="tab" data-view="wechat">WeChat</button>
+        <button class="tab" data-view="test">Test</button>
+        <button class="tab" data-view="logs">Logs</button>
+      </nav>
+    </div>
+  </header>
+
+  <main>
+    <section id="view-profile" class="view">
+      <div class="grid">
+        <div class="panel">
+          <h2>Pet Profile</h2>
+          <div class="row">
+            <div><label>Pet ID</label><input id="pet-id" value="cat-home"></div>
+            <div><label>Pet name</label><input id="profile-name" value="猫咪"></div>
+            <div><label>Species</label><input id="profile-species" value="cat"></div>
+            <div><label>Breed</label><input id="profile-breed"></div>
+          </div>
+          <label>Personality note</label>
+          <textarea id="profile-personality"></textarea>
+          <label>Medical note</label>
+          <textarea id="profile-medical"></textarea>
+          <div class="actions">
+            <button class="primary" id="save-profile">Save profile</button>
+            <button id="load-profile">Reload</button>
+            <span class="status" id="profile-status">idle</span>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>State</h2>
+          <pre id="state-preview">{}</pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-wechat" class="view hidden">
+      <div class="grid">
+        <div>
+          <div class="panel">
+            <h2>Shared WeChat Controls</h2>
+            <div class="row">
+              <div><label>Pet WeChat display name</label><input id="wechat-name"></div>
+              <div><label>Wake words</label><textarea id="wake-words" placeholder="One per line"></textarea></div>
+              <div><label>Quiet start</label><input id="quiet-start" value="23:00"></div>
+              <div><label>Quiet end</label><input id="quiet-end" value="08:00"></div>
+              <div><label>Max reply chars</label><input id="max-reply" type="number" min="20" max="500" value="120"></div>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" id="emergency-stop"> Emergency stop</label>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Group Settings</h2>
+            <div class="row">
+              <div><label>Group allowlist</label><textarea id="wechat-groups" placeholder="One group per line"></textarea></div>
+              <div><label>Group interval minutes</label><input id="rate-minutes" type="number" min="1" max="1440" value="5"></div>
+              <div><label>Group daily limit</label><input id="daily-limit" type="number" min="1" max="300" value="30"></div>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" id="require-mention" checked> Require mention</label>
+              <label><input type="checkbox" id="manual-review" checked> Manual review</label>
+              <label><input type="checkbox" id="auto-reply"> Group auto reply</label>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Private Chat Settings</h2>
+            <div class="row">
+              <div><label>Private contact allowlist</label><textarea id="private-contacts" placeholder="One contact per line"></textarea></div>
+              <div><label>Private interval minutes</label><input id="private-rate-minutes" type="number" min="1" max="1440" value="5"></div>
+              <div><label>Private daily limit</label><input id="private-daily-limit" type="number" min="1" max="300" value="30"></div>
+            </div>
+            <div class="checks">
+              <label><input type="checkbox" id="private-auto-reply"> Private low-frequency auto reply</label>
+            </div>
+            <div class="actions">
+              <button class="primary" id="save-wechat">Save WeChat settings</button>
+              <button id="load-wechat">Reload</button>
+              <button class="danger" id="panic-stop">Emergency stop now</button>
+              <span class="status" id="wechat-status">idle</span>
+            </div>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Settings Preview</h2>
+          <pre id="wechat-preview">{}</pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-test" class="view hidden">
+      <div class="grid">
+        <div>
+          <div class="panel">
+            <h2>Group Reply Test</h2>
+            <div class="row">
+              <div><label>Group name</label><input id="test-group"></div>
+              <div><label>Sender name</label><input id="test-sender"></div>
+            </div>
+            <label>Message</label>
+            <textarea id="test-message" placeholder="@猫咪 你在干嘛"></textarea>
+            <div class="checks"><label><input type="checkbox" id="test-mentioned" checked> Mentioned</label></div>
+            <div class="actions"><button class="primary" id="generate-reply">Generate group reply</button></div>
+          </div>
+
+          <div class="panel">
+            <h2>Private Reply Test</h2>
+            <div class="row">
+              <div><label>Contact name</label><input id="private-contact"></div>
+              <div><label>Observed at</label><input id="private-observed" placeholder="auto"></div>
+            </div>
+            <label>Message</label>
+            <textarea id="private-message" placeholder="猫咪你在干嘛"></textarea>
+            <div class="actions"><button class="primary" id="generate-private-reply">Generate private reply</button></div>
+          </div>
+        </div>
+        <div class="panel">
+          <h2>Reply Result</h2>
+          <div class="actions">
+            <button id="copy-reply">Copy reply</button>
+            <span class="status" id="reply-status">idle</span>
+          </div>
+          <pre id="reply-preview">{}</pre>
+        </div>
+      </div>
+    </section>
+
+    <section id="view-logs" class="view hidden">
+      <div class="panel">
+        <h2>Logs</h2>
+        <div class="row">
+          <div><label>Trace ID</label><input id="log-trace"></div>
+          <div><label>Service</label><input id="log-service" placeholder="aipet-bridge / wechat-sidecar"></div>
+          <div><label>Event</label><input id="log-event" placeholder="wechat.private.detected"></div>
+        </div>
+        <div class="actions">
+          <button class="primary" id="load-logs">Load logs</button>
+          <span class="status" id="log-status">idle</span>
+        </div>
+      </div>
+      <div class="panel"><pre id="log-preview">[]</pre></div>
+    </section>
+  </main>
+
+  <script>
+    const $ = (id) => document.getElementById(id);
+    let lastReply = null;
+
+    function petId() { return $("pet-id").value.trim() || "cat-home"; }
+    function listValue(id) {
+      return $(id).value.split(/\r?\n|,/).map((item) => item.trim()).filter(Boolean);
+    }
+    function showJson(id, value) { $(id).textContent = JSON.stringify(value, null, 2); }
+    function status(id, text, kind = "") {
+      const el = $(id);
+      el.textContent = text;
+      el.className = `status ${kind}`;
+    }
+    async function api(path, options = {}) {
+      const response = await fetch(path, {
+        headers: {"Content-Type": "application/json", ...(options.headers || {})},
+        ...options,
+      });
+      const text = await response.text();
+      const data = text ? JSON.parse(text) : null;
+      if (!response.ok) throw new Error(data?.detail || response.statusText);
+      return data;
+    }
+
+    document.querySelectorAll(".tab").forEach((button) => {
+      button.addEventListener("click", () => {
+        document.querySelectorAll(".tab").forEach((item) => item.classList.remove("active"));
+        document.querySelectorAll(".view").forEach((item) => item.classList.add("hidden"));
+        button.classList.add("active");
+        $(`view-${button.dataset.view}`).classList.remove("hidden");
+      });
+    });
+
+    async function loadHealth() {
+      try {
+        const data = await api("/health");
+        $("health-status").textContent = `Bridge: ${data.status}, OpenClaw: ${data.openclaw_configured ? "configured" : "fallback"}`;
+      } catch (error) {
+        $("health-status").textContent = `Bridge offline: ${error.message}`;
+      }
+    }
+
+    async function loadProfile() {
+      try {
+        const data = await api(`/pets/${encodeURIComponent(petId())}/profile`);
+        $("profile-name").value = data.name || "";
+        $("profile-species").value = data.species || "cat";
+        $("profile-breed").value = data.breed || "";
+        $("profile-personality").value = data.personality || "";
+        $("profile-medical").value = data.medical_notes || "";
+        showJson("state-preview", await api(`/pets/${encodeURIComponent(petId())}/state`));
+        status("profile-status", "loaded", "ok");
+      } catch (error) {
+        status("profile-status", error.message, "danger");
+      }
+    }
+
+    async function saveProfile() {
+      try {
+        const payload = {
+          name: $("profile-name").value.trim(),
+          species: $("profile-species").value.trim() || "cat",
+          breed: $("profile-breed").value.trim() || null,
+          personality: $("profile-personality").value.trim() || null,
+          medical_notes: $("profile-medical").value.trim() || null,
+        };
+        const data = await api(`/pets/${encodeURIComponent(petId())}/profile`, {method: "PUT", body: JSON.stringify(payload)});
+        showJson("state-preview", data);
+        status("profile-status", "saved", "ok");
+      } catch (error) {
+        status("profile-status", error.message, "danger");
+      }
+    }
+
+    async function loadWechat() {
+      try {
+        const data = await api(`/pets/${encodeURIComponent(petId())}/wechat/settings`);
+        const s = data.settings;
+        $("wechat-name").value = s.pet_wechat_name || "";
+        $("wechat-groups").value = (s.family_groups || []).join("\n");
+        $("private-contacts").value = (s.private_contact_allowlist || []).join("\n");
+        $("wake-words").value = (s.wake_words || []).join("\n");
+        $("require-mention").checked = !!s.require_mention;
+        $("manual-review").checked = !!s.manual_review;
+        $("auto-reply").checked = !!s.auto_reply_enabled;
+        $("private-auto-reply").checked = !!s.private_auto_reply_enabled;
+        $("emergency-stop").checked = !!s.emergency_stop;
+        $("quiet-start").value = s.quiet_hours_start || "23:00";
+        $("quiet-end").value = s.quiet_hours_end || "08:00";
+        $("rate-minutes").value = s.rate_limit_minutes || 5;
+        $("private-rate-minutes").value = s.private_rate_limit_minutes || 5;
+        $("daily-limit").value = s.daily_limit || 30;
+        $("private-daily-limit").value = s.private_daily_limit || 30;
+        $("max-reply").value = s.max_reply_chars || 120;
+        showJson("wechat-preview", data);
+        status("wechat-status", "loaded", "ok");
+      } catch (error) {
+        status("wechat-status", error.message, "danger");
+      }
+    }
+
+    async function saveWechat(extra = {}) {
+      try {
+        const payload = {
+          pet_wechat_name: $("wechat-name").value.trim(),
+          family_groups: listValue("wechat-groups"),
+          private_contact_allowlist: listValue("private-contacts"),
+          wake_words: listValue("wake-words"),
+          require_mention: $("require-mention").checked,
+          manual_review: $("manual-review").checked,
+          auto_reply_enabled: $("auto-reply").checked,
+          private_auto_reply_enabled: $("private-auto-reply").checked,
+          emergency_stop: $("emergency-stop").checked,
+          quiet_hours_start: $("quiet-start").value,
+          quiet_hours_end: $("quiet-end").value,
+          rate_limit_minutes: Number($("rate-minutes").value || 5),
+          private_rate_limit_minutes: Number($("private-rate-minutes").value || 5),
+          daily_limit: Number($("daily-limit").value || 30),
+          private_daily_limit: Number($("private-daily-limit").value || 30),
+          max_reply_chars: Number($("max-reply").value || 120),
+          ...extra,
+        };
+        const data = await api(`/pets/${encodeURIComponent(petId())}/wechat/settings`, {method: "PUT", body: JSON.stringify(payload)});
+        showJson("wechat-preview", data);
+        status("wechat-status", "saved", "ok");
+      } catch (error) {
+        status("wechat-status", error.message, "danger");
+      }
+    }
+
+    async function generateGroupReply() {
+      try {
+        lastReply = await api(`/pets/${encodeURIComponent(petId())}/wechat/reply`, {
+          method: "POST",
+          body: JSON.stringify({
+            group_name: $("test-group").value.trim(),
+            sender_name: $("test-sender").value.trim(),
+            message_text: $("test-message").value.trim(),
+            mentioned: $("test-mentioned").checked,
+            observed_at: new Date().toISOString(),
+          }),
+        });
+        showReply(lastReply);
+      } catch (error) {
+        status("reply-status", error.message, "danger");
+      }
+    }
+
+    async function generatePrivateReply() {
+      try {
+        lastReply = await api(`/pets/${encodeURIComponent(petId())}/wechat/private-reply`, {
+          method: "POST",
+          body: JSON.stringify({
+            contact_name: $("private-contact").value.trim(),
+            message_text: $("private-message").value.trim(),
+            observed_at: $("private-observed").value.trim() || new Date().toISOString(),
+          }),
+        });
+        showReply(lastReply);
+      } catch (error) {
+        status("reply-status", error.message, "danger");
+      }
+    }
+
+    function showReply(reply) {
+      showJson("reply-preview", reply);
+      $("log-trace").value = reply.trace_id || "";
+      status("reply-status", reply.should_reply ? "reply generated" : `blocked: ${reply.block_reason}`, reply.should_reply ? "ok" : "warn");
+    }
+
+    async function loadLogs() {
+      try {
+        const params = new URLSearchParams();
+        if ($("log-trace").value.trim()) params.set("trace_id", $("log-trace").value.trim());
+        if ($("log-service").value.trim()) params.set("service", $("log-service").value.trim());
+        if ($("log-event").value.trim()) params.set("event", $("log-event").value.trim());
+        params.set("limit", "200");
+        const data = await api(`/logs?${params.toString()}`);
+        showJson("log-preview", data);
+        status("log-status", `loaded ${data.length}`, "ok");
+      } catch (error) {
+        status("log-status", error.message, "danger");
+      }
+    }
+
+    $("load-profile").addEventListener("click", loadProfile);
+    $("save-profile").addEventListener("click", saveProfile);
+    $("load-wechat").addEventListener("click", loadWechat);
+    $("save-wechat").addEventListener("click", () => saveWechat());
+    $("panic-stop").addEventListener("click", () => {
+      $("emergency-stop").checked = true;
+      $("auto-reply").checked = false;
+      $("private-auto-reply").checked = false;
+      saveWechat({emergency_stop: true, auto_reply_enabled: false, private_auto_reply_enabled: false});
+    });
+    $("generate-reply").addEventListener("click", generateGroupReply);
+    $("generate-private-reply").addEventListener("click", generatePrivateReply);
+    $("load-logs").addEventListener("click", loadLogs);
+    $("copy-reply").addEventListener("click", async () => {
+      if (lastReply?.reply_text) await navigator.clipboard.writeText(lastReply.reply_text);
+      status("reply-status", "copied", "ok");
+    });
+
+    Promise.allSettled([loadHealth(), loadProfile(), loadWechat()]);
+  </script>
+</body>
+</html>

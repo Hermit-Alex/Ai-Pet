@@ -412,7 +412,7 @@ class SQLiteStore:
             group_clause = "AND group_name = ?"
             params.insert(1, group_name)
         sql = f"""
-            SELECT COUNT(*) AS count FROM wechat_reply_record
+            SELECT COUNT(DISTINCT trace_id) AS count FROM wechat_reply_record
             WHERE pet_id = ?
               {group_clause}
               AND created_at >= ?

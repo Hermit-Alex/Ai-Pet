@@ -12,7 +12,7 @@ from aipet_bridge.models import PetProfile
 from aipet_bridge.openclaw import OpenClawClientError
 from aipet_bridge.service import AipetBridgeService
 from aipet_bridge.storage import SQLiteStore
-from aipet_bridge.wechat import normalize_wechat_settings
+from aipet_bridge.wechat import normalize_wechat_settings, utc_iso_today_start
 
 
 def make_service(temp_dir: str) -> AipetBridgeService:
@@ -539,6 +539,32 @@ class BridgeStorageTest(unittest.TestCase):
 
             self.assertTrue(first["should_reply"])
             self.assertTrue(second["should_reply"])
+
+    def test_reply_count_deduplicates_generated_and_sent_trace(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            store = SQLiteStore(Path(temp_dir) / "aipet.sqlite3")
+            store.init_schema()
+            store.record_wechat_reply(
+                pet_id="cat-home",
+                group_name="private:dad",
+                trace_id="trace-same-reply",
+                status="private_generated",
+            )
+            store.record_wechat_reply(
+                pet_id="cat-home",
+                group_name="private:dad",
+                trace_id="trace-same-reply",
+                status="private_sent",
+            )
+
+            count = store.count_wechat_replies_since(
+                pet_id="cat-home",
+                group_name=None,
+                since_iso=utc_iso_today_start(),
+                statuses=("private_generated", "private_sent", "private_manual_review"),
+            )
+
+            self.assertEqual(count, 1)
 
     def test_reply_text_is_summarized_in_audit_logs_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

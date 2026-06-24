@@ -826,7 +826,7 @@ class AipetBridgeService:
             )
             return reply, "openclaw", False
         except OpenClawClientError as exc:
-            safe_fallback_send_allowed = bool(getattr(self.openclaw, "enabled", False))
+            safe_fallback_send_allowed = False
             self.audit_log.log(
                 stream="errors",
                 level="error",

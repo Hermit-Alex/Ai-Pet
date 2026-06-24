@@ -376,7 +376,7 @@ class BridgeStorageTest(unittest.TestCase):
             self.assertFalse(second["should_reply"])
             self.assertEqual(second["block_reason"], "duplicate_message")
 
-    def test_configured_openclaw_failure_allows_safe_private_fallback(self) -> None:
+    def test_configured_openclaw_failure_keeps_private_fallback_local(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             root = Path(temp_dir)
             settings = Settings(
@@ -420,7 +420,7 @@ class BridgeStorageTest(unittest.TestCase):
 
             self.assertTrue(result["should_reply"])
             self.assertEqual(result["model_source"], "local_fallback")
-            self.assertTrue(result["safe_fallback_send_allowed"])
+            self.assertFalse(result["safe_fallback_send_allowed"])
 
     def test_private_reply_respects_manual_review(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:

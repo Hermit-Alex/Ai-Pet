@@ -422,6 +422,32 @@ class SQLiteStore:
             row = conn.execute(sql, tuple(params)).fetchone()
         return int(row["count"])
 
+    def latest_wechat_reply_created_at(
+        self,
+        *,
+        pet_id: str,
+        group_name: str | None,
+        statuses: Iterable[str] = ("generated", "manual_review", "sent"),
+    ) -> str | None:
+        status_list = list(statuses)
+        placeholders = ",".join("?" for _ in status_list)
+        params: list[Any] = [pet_id, *status_list]
+        group_clause = ""
+        if group_name is not None:
+            group_clause = "AND group_name = ?"
+            params.insert(1, group_name)
+        sql = f"""
+            SELECT MAX(created_at) AS created_at FROM wechat_reply_record
+            WHERE pet_id = ?
+              {group_clause}
+              AND status IN ({placeholders})
+        """
+        with closing(self.connect()) as conn:
+            row = conn.execute(sql, tuple(params)).fetchone()
+        if row is None:
+            return None
+        return row["created_at"]
+
 
 def _profile_from_row(row: sqlite3.Row) -> PetProfile:
     return PetProfile(

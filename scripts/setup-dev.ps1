@@ -18,7 +18,7 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
 
 if ($Install) {
   & $VenvPython -m pip install --no-user --upgrade pip
-  & $VenvPython -m pip install --no-user -e "$ProjectRoot[dev]"
+  & $VenvPython -m pip install --no-user -e "$ProjectRoot[dev,wechat]"
 }
 
 Write-Host "Virtual environment: $VenvPath"

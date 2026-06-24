@@ -12,8 +12,11 @@ class OpenClawClientError(RuntimeError):
     pass
 
 
+OPENCLAW_MAX_TOKENS = 512
+
+
 class OpenClawClient:
-    def __init__(self, settings: Settings, *, timeout_seconds: float = 20.0) -> None:
+    def __init__(self, settings: Settings, *, timeout_seconds: float = 60.0) -> None:
         self.settings = settings
         self.timeout_seconds = timeout_seconds
 
@@ -34,7 +37,7 @@ class OpenClawClient:
                 {"role": "user", "content": user_prompt},
             ],
             "temperature": 0.7,
-            "max_tokens": 220,
+            "max_tokens": OPENCLAW_MAX_TOKENS,
         }
         headers = {"Content-Type": "application/json"}
         if self.settings.openclaw_api_key:

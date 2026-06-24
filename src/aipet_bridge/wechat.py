@@ -21,6 +21,7 @@ DEFAULT_WECHAT_SETTINGS: dict[str, Any] = {
     "quiet_hours_end": "08:00",
     "rate_limit_minutes": 5,
     "private_rate_limit_minutes": 5,
+    "private_rate_limit_seconds": 300,
     "daily_limit": 30,
     "private_daily_limit": 30,
     "max_reply_chars": 120,
@@ -39,6 +40,13 @@ def normalize_wechat_settings(settings: dict[str, Any] | None) -> dict[str, Any]
     merged["emergency_stop"] = bool(merged.get("emergency_stop"))
     merged["rate_limit_minutes"] = max(1, int(merged.get("rate_limit_minutes") or 5))
     merged["private_rate_limit_minutes"] = max(1, int(merged.get("private_rate_limit_minutes") or 5))
+    private_rate_limit_seconds = merged.get("private_rate_limit_seconds")
+    if private_rate_limit_seconds is None:
+        private_rate_limit_seconds = int(merged["private_rate_limit_minutes"]) * 60
+    merged["private_rate_limit_seconds"] = min(
+        3600,
+        max(5, int(private_rate_limit_seconds or int(merged["private_rate_limit_minutes"]) * 60)),
+    )
     merged["daily_limit"] = max(1, int(merged.get("daily_limit") or 30))
     merged["private_daily_limit"] = max(1, int(merged.get("private_daily_limit") or 30))
     merged["max_reply_chars"] = min(500, max(20, int(merged.get("max_reply_chars") or 120)))
@@ -156,6 +164,10 @@ def utc_iso_minutes_ago(minutes: int) -> str:
     return (datetime.now(tz=UTC) - timedelta(minutes=minutes)).replace(microsecond=0).isoformat()
 
 
+def utc_iso_seconds_ago(seconds: int) -> str:
+    return (datetime.now(tz=UTC) - timedelta(seconds=seconds)).replace(microsecond=0).isoformat()
+
+
 def utc_iso_today_start() -> str:
     now = datetime.now(tz=UTC)
     return datetime(now.year, now.month, now.day, tzinfo=UTC).isoformat()
@@ -206,13 +218,27 @@ def fallback_reply(*, pet_name: str, sender_name: str, message_text: str, max_ch
 
 
 def _clean_list(value: Any) -> list[str]:
+    if value is None:
+        return []
     if isinstance(value, str):
-        raw_items = value.replace("\n", ",").split(",")
-    elif isinstance(value, list):
-        raw_items = value
+        raw_items = [value]
+    elif isinstance(value, list | tuple):
+        raw_items = list(value)
     else:
         raw_items = []
-    return [str(item).strip() for item in raw_items if str(item).strip()]
+
+    cleaned: list[str] = []
+    for item in raw_items:
+        normalized = (
+            str(item)
+            .replace("\r", "\n")
+            .replace("，", ",")
+            .replace("；", ";")
+            .replace(";", ",")
+            .replace("\n", ",")
+        )
+        cleaned.extend(part.strip() for part in normalized.split(",") if part.strip())
+    return cleaned
 
 
 def _contains_wake_word(message_text: str, wake_words: list[str]) -> bool:

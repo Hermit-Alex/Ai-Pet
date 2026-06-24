@@ -60,6 +60,7 @@ class WechatSettingsUpdate(BaseModel):
     quiet_hours_end: str | None = None
     rate_limit_minutes: int | None = Field(default=None, ge=1, le=1440)
     private_rate_limit_minutes: int | None = Field(default=None, ge=1, le=1440)
+    private_rate_limit_seconds: int | None = Field(default=None, ge=5, le=3600)
     daily_limit: int | None = Field(default=None, ge=1, le=300)
     private_daily_limit: int | None = Field(default=None, ge=1, le=300)
     max_reply_chars: int | None = Field(default=None, ge=20, le=500)
@@ -98,8 +99,18 @@ class PrivateSentRequest(BaseModel):
     message_fingerprint: str = Field(min_length=1)
 
 
+class WechatSentRequest(BaseModel):
+    group_name: str = Field(min_length=1)
+    trace_id: str = Field(min_length=1)
+    message_fingerprint: str = Field(min_length=1)
+
+
 class ToolPetStateRequest(BaseModel):
     pet_id: str | None = None
+
+
+class OpenClawSelfTestRequest(BaseModel):
+    trace_id: str | None = None
 
 
 def create_app(settings: Settings | None = None) -> FastAPI:
@@ -122,6 +133,8 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             "status": "ok",
             "default_pet_id": settings.default_pet_id,
             "openclaw_configured": bool(settings.openclaw_base_url),
+            "wechat_policy_version": "2026-06-private-manual-review",
+            "wechat_private_manual_review_enforced": True,
         }
 
     @app.get("/ui", include_in_schema=False)
@@ -194,6 +207,17 @@ def create_app(settings: Settings | None = None) -> FastAPI:
                 importance=memory.importance,
                 source=memory.source,
             )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/pets/{pet_id}/openclaw/self-test")
+    def openclaw_self_test(
+        pet_id: str,
+        request: OpenClawSelfTestRequest | None = None,
+    ) -> dict[str, Any]:
+        try:
+            trace_id = request.trace_id if request is not None else None
+            return service.test_openclaw_path(pet_id=pet_id, trace_id=trace_id)
         except KeyError as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
 
@@ -296,6 +320,18 @@ def create_app(settings: Settings | None = None) -> FastAPI:
             return service.record_private_sent(
                 pet_id=pet_id,
                 contact_name=request.contact_name,
+                trace_id=request.trace_id,
+                message_fingerprint=request.message_fingerprint,
+            )
+        except KeyError as exc:
+            raise HTTPException(status_code=404, detail=str(exc)) from exc
+
+    @app.post("/pets/{pet_id}/wechat/sent")
+    def record_wechat_sent(pet_id: str, request: WechatSentRequest) -> dict[str, Any]:
+        try:
+            return service.record_wechat_sent(
+                pet_id=pet_id,
+                group_name=request.group_name,
                 trace_id=request.trace_id,
                 message_fingerprint=request.message_fingerprint,
             )

@@ -238,7 +238,7 @@
             <h2>Private Chat Settings</h2>
             <div class="row">
               <div><label>Private contact allowlist</label><textarea id="private-contacts" placeholder="One contact per line"></textarea></div>
-              <div><label>Private interval minutes</label><input id="private-rate-minutes" type="number" min="1" max="1440" value="5"></div>
+              <div><label>Private interval seconds</label><input id="private-rate-seconds" type="number" min="5" max="3600" value="300"></div>
               <div><label>Private daily limit</label><input id="private-daily-limit" type="number" min="1" max="300" value="30"></div>
             </div>
             <div class="checks">
@@ -421,7 +421,7 @@
         $("quiet-start").value = s.quiet_hours_start || "23:00";
         $("quiet-end").value = s.quiet_hours_end || "08:00";
         $("rate-minutes").value = s.rate_limit_minutes || 5;
-        $("private-rate-minutes").value = s.private_rate_limit_minutes || 5;
+        $("private-rate-seconds").value = s.private_rate_limit_seconds || ((s.private_rate_limit_minutes || 5) * 60);
         $("daily-limit").value = s.daily_limit || 30;
         $("private-daily-limit").value = s.private_daily_limit || 30;
         $("max-reply").value = s.max_reply_chars || 120;
@@ -447,7 +447,7 @@
           quiet_hours_start: $("quiet-start").value,
           quiet_hours_end: $("quiet-end").value,
           rate_limit_minutes: Number($("rate-minutes").value || 5),
-          private_rate_limit_minutes: Number($("private-rate-minutes").value || 5),
+          private_rate_limit_seconds: Number($("private-rate-seconds").value || 300),
           daily_limit: Number($("daily-limit").value || 30),
           private_daily_limit: Number($("private-daily-limit").value || 30),
           max_reply_chars: Number($("max-reply").value || 120),

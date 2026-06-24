@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from .audit_log import JsonlAuditLog, summarize_text
@@ -8,6 +9,7 @@ from .config import Settings
 from .models import PetProfile
 from .openclaw import OpenClawClient, OpenClawClientError
 from .persona import build_persona_profile, build_system_prompt
+from .persona_presets import get_persona_preset
 from .storage import SQLiteStore
 from .wechat import (
     build_user_prompt,
@@ -18,6 +20,7 @@ from .wechat import (
     should_reply_to_private_message,
     should_reply_to_message,
     utc_iso_minutes_ago,
+    utc_iso_seconds_ago,
     utc_iso_today_start,
 )
 
@@ -226,6 +229,9 @@ class AipetBridgeService:
         persona = self.store.get_persona(pet_id)
         if persona is not None:
             return persona
+        preset = get_persona_preset(pet_id)
+        if preset is not None:
+            return preset
         default_profile = build_persona_profile(
             pet_id=pet_id,
             pet_name=profile.name,
@@ -337,6 +343,7 @@ class AipetBridgeService:
             pet_id=pet_id,
             group_name=group_name,
             settings=settings,
+            trace_id=trace_id,
         )
         if rate_reason:
             return self._blocked_reply(
@@ -384,7 +391,7 @@ class AipetBridgeService:
             sender_name=sender_name,
             message_fingerprint=fingerprint,
         )
-        reply_text, model_source = self._generate_reply(
+        reply_text, model_source, safe_fallback_send_allowed = self._generate_reply(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             pet_name=profile.name,
@@ -412,6 +419,7 @@ class AipetBridgeService:
             message_fingerprint=fingerprint,
             result=status,
             model_source=model_source,
+            safe_fallback_send_allowed=safe_fallback_send_allowed,
             reply_text=reply_text,
         )
         return {
@@ -424,6 +432,7 @@ class AipetBridgeService:
             "reason": reason,
             "message_fingerprint": fingerprint,
             "model_source": model_source,
+            "safe_fallback_send_allowed": safe_fallback_send_allowed,
         }
 
     def preview_private_reply(
@@ -493,20 +502,22 @@ class AipetBridgeService:
                 event="wechat.private.ignored",
             )
 
-        rate_reason = self._private_rate_limit_reason(
+        rate_block = self._private_rate_limit_block(
             pet_id=pet_id,
             contact_name=contact_name,
             settings=settings,
+            trace_id=trace_id,
         )
-        if rate_reason:
+        if rate_block:
             return self._blocked_reply(
                 trace_id=trace_id,
                 pet_id=pet_id,
                 group_name=channel_name,
                 sender_name=contact_name,
                 fingerprint=fingerprint,
-                reason=rate_reason,
+                reason=rate_block["reason"],
                 event="wechat.private.ignored",
+                retry_after_seconds=rate_block.get("retry_after_seconds"),
             )
 
         safety_reason = self._safety_block_reason(message_text)
@@ -544,7 +555,7 @@ class AipetBridgeService:
             contact_name=contact_name,
             message_fingerprint=fingerprint,
         )
-        reply_text, model_source = self._generate_reply(
+        reply_text, model_source, safe_fallback_send_allowed = self._generate_reply(
             system_prompt=system_prompt,
             user_prompt=user_prompt,
             pet_name=profile.name,
@@ -554,11 +565,12 @@ class AipetBridgeService:
             trace_id=trace_id,
             pet_id=pet_id,
         )
+        status = "private_manual_review" if settings["manual_review"] else "private_generated"
         self.store.record_wechat_reply(
             pet_id=pet_id,
             group_name=channel_name,
             trace_id=trace_id,
-            status="private_generated",
+            status=status,
         )
         self.audit_log.log(
             stream="audit",
@@ -568,20 +580,22 @@ class AipetBridgeService:
             pet_id=pet_id,
             contact_name=contact_name,
             message_fingerprint=fingerprint,
-            result="generated",
+            result=status,
             model_source=model_source,
+            safe_fallback_send_allowed=safe_fallback_send_allowed,
             reply_text=reply_text,
         )
         return {
             "trace_id": trace_id,
             "should_reply": True,
             "reply_text": reply_text,
-            "requires_manual_review": False,
+            "requires_manual_review": bool(settings["manual_review"]),
             "auto_reply_enabled": bool(settings["private_auto_reply_enabled"]),
             "block_reason": None,
             "reason": reason,
             "message_fingerprint": fingerprint,
             "model_source": model_source,
+            "safe_fallback_send_allowed": safe_fallback_send_allowed,
             "contact_name": contact_name,
         }
 
@@ -601,6 +615,82 @@ class AipetBridgeService:
             event=event,
             limit=limit,
         )
+
+    def test_openclaw_path(
+        self,
+        *,
+        pet_id: str,
+        trace_id: str | None = None,
+    ) -> dict[str, Any]:
+        self._ensure_pet_exists(pet_id)
+        trace_id = trace_id or self.audit_log.new_trace_id()
+        if not self.openclaw.enabled:
+            reason = "openclaw_not_configured"
+            self.audit_log.log(
+                stream="errors",
+                level="error",
+                service="aipet-bridge",
+                event="bridge.openclaw.self_test.failed",
+                trace_id=trace_id,
+                pet_id=pet_id,
+                result=reason,
+            )
+            return {
+                "trace_id": trace_id,
+                "ok": False,
+                "configured": False,
+                "model_source": "local_fallback",
+                "block_reason": reason,
+            }
+
+        try:
+            reply = self.openclaw.chat(
+                system_prompt=(
+                    "You are an AI Pet connectivity self-test. "
+                    "Reply with one short harmless phrase only."
+                ),
+                user_prompt="Say OK in a warm pet voice, under 12 characters.",
+            )
+            reply = " ".join(reply.split())[:80]
+            if not reply:
+                raise OpenClawClientError("OpenClaw returned an empty self-test response.")
+            self.audit_log.log(
+                stream="bridge",
+                service="aipet-bridge",
+                event="bridge.openclaw.self_test.completed",
+                trace_id=trace_id,
+                pet_id=pet_id,
+                result="ok",
+                model_source="openclaw",
+                reply_text=reply,
+            )
+            return {
+                "trace_id": trace_id,
+                "ok": True,
+                "configured": True,
+                "model_source": "openclaw",
+                "reply_text_summary": summarize_text(reply),
+                "block_reason": None,
+            }
+        except OpenClawClientError as exc:
+            self.audit_log.log(
+                stream="errors",
+                level="error",
+                service="aipet-bridge",
+                event="bridge.openclaw.self_test.failed",
+                trace_id=trace_id,
+                pet_id=pet_id,
+                result="failed",
+                error=str(exc),
+            )
+            return {
+                "trace_id": trace_id,
+                "ok": False,
+                "configured": True,
+                "model_source": "local_fallback",
+                "block_reason": "openclaw_failed",
+                "error": str(exc),
+            }
 
     def record_manual_decision(
         self,
@@ -659,6 +749,33 @@ class AipetBridgeService:
         )
         return {"trace_id": trace_id, "contact_name": contact_name, "recorded": True}
 
+    def record_wechat_sent(
+        self,
+        *,
+        pet_id: str,
+        group_name: str,
+        trace_id: str,
+        message_fingerprint: str,
+    ) -> dict[str, Any]:
+        self._ensure_pet_exists(pet_id)
+        self.store.record_wechat_reply(
+            pet_id=pet_id,
+            group_name=group_name,
+            trace_id=trace_id,
+            status="sent",
+        )
+        self.audit_log.log(
+            stream="audit",
+            service="wechat-sidecar",
+            event="wechat.reply.sent",
+            trace_id=trace_id,
+            pet_id=pet_id,
+            group_name=group_name,
+            message_fingerprint=message_fingerprint,
+            result="sent",
+        )
+        return {"trace_id": trace_id, "group_name": group_name, "recorded": True}
+
     def seed_demo_data(self) -> None:
         pet_id = self.settings.default_pet_id
         self.add_event(
@@ -687,10 +804,18 @@ class AipetBridgeService:
         max_chars: int,
         trace_id: str,
         pet_id: str,
-    ) -> tuple[str, str]:
+    ) -> tuple[str, str, bool]:
         try:
-            reply = self.openclaw.chat(system_prompt=system_prompt, user_prompt=user_prompt)
-            reply = " ".join(reply.split())[:max_chars]
+            reply = self._generate_openclaw_reply_with_retry(
+                system_prompt=system_prompt,
+                user_prompt=user_prompt,
+                pet_name=pet_name,
+                sender_name=sender_name,
+                message_text=message_text,
+                max_chars=max_chars,
+                trace_id=trace_id,
+                pet_id=pet_id,
+            )
             self.audit_log.log(
                 stream="bridge",
                 service="aipet-bridge",
@@ -699,8 +824,9 @@ class AipetBridgeService:
                 pet_id=pet_id,
                 result="ok",
             )
-            return reply, "openclaw"
+            return reply, "openclaw", False
         except OpenClawClientError as exc:
+            safe_fallback_send_allowed = bool(getattr(self.openclaw, "enabled", False))
             self.audit_log.log(
                 stream="errors",
                 level="error",
@@ -709,6 +835,7 @@ class AipetBridgeService:
                 trace_id=trace_id,
                 pet_id=pet_id,
                 error=str(exc),
+                safe_fallback_send_allowed=safe_fallback_send_allowed,
             )
             return (
                 fallback_reply(
@@ -718,7 +845,58 @@ class AipetBridgeService:
                     max_chars=max_chars,
                 ),
                 "local_fallback",
+                safe_fallback_send_allowed,
             )
+
+    def _generate_openclaw_reply_with_retry(
+        self,
+        *,
+        system_prompt: str,
+        user_prompt: str,
+        pet_name: str,
+        sender_name: str,
+        message_text: str,
+        max_chars: int,
+        trace_id: str,
+        pet_id: str,
+    ) -> str:
+        first_reply = self.openclaw.chat(system_prompt=system_prompt, user_prompt=user_prompt)
+        normalized = _normalize_model_reply(first_reply, max_chars=max_chars)
+        if normalized and not _looks_like_openclaw_agent_failure(normalized):
+            return normalized
+
+        self.audit_log.log(
+            stream="errors",
+            level="warning",
+            service="aipet-bridge",
+            event="bridge.openclaw.invalid_reply",
+            trace_id=trace_id,
+            pet_id=pet_id,
+            result="retrying",
+            reply_text=normalized or first_reply,
+        )
+        retry_reply = self.openclaw.chat(
+            system_prompt=_build_fast_retry_system_prompt(pet_name=pet_name),
+            user_prompt=_build_fast_retry_user_prompt(
+                pet_name=pet_name,
+                sender_name=sender_name,
+                message_text=message_text,
+                max_chars=max_chars,
+            ),
+        )
+        normalized_retry = _normalize_model_reply(retry_reply, max_chars=max_chars)
+        if normalized_retry and not _looks_like_openclaw_agent_failure(normalized_retry):
+            self.audit_log.log(
+                stream="bridge",
+                service="aipet-bridge",
+                event="bridge.openclaw.retry_completed",
+                trace_id=trace_id,
+                pet_id=pet_id,
+                result="ok",
+            )
+            return normalized_retry
+
+        raise OpenClawClientError("OpenClaw returned an agent failure reply.")
 
     def _blocked_reply(
         self,
@@ -730,7 +908,11 @@ class AipetBridgeService:
         fingerprint: str,
         reason: str,
         event: str = "wechat.message.ignored",
+        retry_after_seconds: int | None = None,
     ) -> dict[str, Any]:
+        extra_fields: dict[str, Any] = {}
+        if retry_after_seconds is not None:
+            extra_fields["retry_after_seconds"] = retry_after_seconds
         self.audit_log.log(
             stream="audit",
             service="aipet-bridge",
@@ -742,8 +924,9 @@ class AipetBridgeService:
             message_fingerprint=fingerprint,
             result="blocked",
             block_reason=reason,
+            **extra_fields,
         )
-        return {
+        payload = {
             "trace_id": trace_id,
             "should_reply": False,
             "reply_text": None,
@@ -754,8 +937,17 @@ class AipetBridgeService:
             "message_fingerprint": fingerprint,
             "model_source": None,
         }
+        payload.update(extra_fields)
+        return payload
 
-    def _rate_limit_reason(self, *, pet_id: str, group_name: str, settings: dict[str, Any]) -> str | None:
+    def _rate_limit_reason(
+        self,
+        *,
+        pet_id: str,
+        group_name: str,
+        settings: dict[str, Any],
+        trace_id: str,
+    ) -> str | None:
         recent_count = self.store.count_wechat_replies_since(
             pet_id=pet_id,
             group_name=group_name,
@@ -766,6 +958,7 @@ class AipetBridgeService:
                 stream="audit",
                 service="aipet-bridge",
                 event="bridge.rate_limited",
+                trace_id=trace_id,
                 pet_id=pet_id,
                 group_name=group_name,
                 result="blocked",
@@ -787,26 +980,59 @@ class AipetBridgeService:
         pet_id: str,
         contact_name: str,
         settings: dict[str, Any],
+        trace_id: str,
     ) -> str | None:
+        block = self._private_rate_limit_block(
+            pet_id=pet_id,
+            contact_name=contact_name,
+            settings=settings,
+            trace_id=trace_id,
+        )
+        return str(block["reason"]) if block else None
+
+    def _private_rate_limit_block(
+        self,
+        *,
+        pet_id: str,
+        contact_name: str,
+        settings: dict[str, Any],
+        trace_id: str,
+    ) -> dict[str, Any] | None:
         channel_name = f"private:{contact_name}"
         statuses = ("private_generated", "private_sent", "private_manual_review")
+        window_seconds = int(settings["private_rate_limit_seconds"])
         recent_count = self.store.count_wechat_replies_since(
             pet_id=pet_id,
             group_name=channel_name,
-            since_iso=utc_iso_minutes_ago(int(settings["private_rate_limit_minutes"])),
+            since_iso=utc_iso_seconds_ago(window_seconds),
             statuses=statuses,
         )
         if recent_count > 0:
+            latest_created_at = self.store.latest_wechat_reply_created_at(
+                pet_id=pet_id,
+                group_name=channel_name,
+                statuses=statuses,
+            )
+            retry_after_seconds = _retry_after_seconds(
+                latest_created_at=latest_created_at,
+                window_seconds=window_seconds,
+            )
             self.audit_log.log(
                 stream="audit",
                 service="aipet-bridge",
                 event="bridge.rate_limited",
+                trace_id=trace_id,
                 pet_id=pet_id,
                 contact_name=contact_name,
                 result="blocked",
                 recent_count=recent_count,
+                window_seconds=window_seconds,
+                retry_after_seconds=retry_after_seconds,
             )
-            return "rate_limited"
+            return {
+                "reason": "rate_limited",
+                "retry_after_seconds": retry_after_seconds,
+            }
         today_count = self.store.count_wechat_replies_since(
             pet_id=pet_id,
             group_name=None,
@@ -814,7 +1040,7 @@ class AipetBridgeService:
             statuses=statuses,
         )
         if today_count >= int(settings["private_daily_limit"]):
-            return "private_daily_limit_reached"
+            return {"reason": "private_daily_limit_reached"}
         return None
 
     def _safety_block_reason(self, message_text: str) -> str | None:
@@ -843,6 +1069,57 @@ class AipetBridgeService:
         if profile is None:
             raise KeyError(f"Unknown pet_id: {pet_id}")
         return profile
+
+
+def _normalize_model_reply(reply: str, *, max_chars: int) -> str:
+    return " ".join(str(reply or "").split())[:max_chars]
+
+
+def _retry_after_seconds(*, latest_created_at: str | None, window_seconds: int) -> int:
+    if not latest_created_at:
+        return max(1, window_seconds)
+    try:
+        latest = datetime.fromisoformat(latest_created_at)
+    except ValueError:
+        return max(1, window_seconds)
+    if latest.tzinfo is None:
+        latest = latest.replace(tzinfo=UTC)
+    available_at = latest.astimezone(UTC) + timedelta(seconds=window_seconds)
+    remaining = (available_at - datetime.now(tz=UTC)).total_seconds()
+    return max(1, min(window_seconds, int(remaining + 0.999)))
+
+
+def _looks_like_openclaw_agent_failure(reply: str) -> bool:
+    normalized = " ".join(str(reply or "").lower().split())
+    failure_markers = (
+        "agent couldn't generate a response",
+        "couldn't generate a response",
+        "could not generate a response",
+        "please try again",
+    )
+    return any(marker in normalized for marker in failure_markers)
+
+
+def _build_fast_retry_system_prompt(*, pet_name: str) -> str:
+    return (
+        f"You are {pet_name}, a warm family AI pet persona. "
+        "Reply in Chinese only. Do not mention systems, agents, models, tools, "
+        "errors, or retries. Keep the reply safe, short, natural, and affectionate."
+    )
+
+
+def _build_fast_retry_user_prompt(
+    *,
+    pet_name: str,
+    sender_name: str,
+    message_text: str,
+    max_chars: int,
+) -> str:
+    return (
+        f"Family member {sender_name} said to {pet_name}: {message_text}\n"
+        f"Write one WeChat reply under {max_chars} Chinese characters. "
+        "Use a gentle pet voice. Output only the reply text."
+    )
 
 
 def decode_event_payload(payload_json: str | None) -> dict[str, Any] | None:

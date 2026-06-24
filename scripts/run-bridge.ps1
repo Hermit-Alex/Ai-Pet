@@ -1,5 +1,6 @@
 param(
-  [int]$Port = 8787
+  [int]$Port = 8787,
+  [switch]$NoReload
 )
 
 $ErrorActionPreference = "Stop"
@@ -13,4 +14,16 @@ if (-not (Test-Path -LiteralPath $VenvPython)) {
 
 $env:PYTHONPATH = Join-Path $ProjectRoot "src"
 Set-Location $ProjectRoot
-& $VenvPython -m uvicorn aipet_bridge.app:app --host 127.0.0.1 --port $Port --reload
+$uvicornArgs = @(
+  "-m",
+  "uvicorn",
+  "aipet_bridge.app:app",
+  "--host",
+  "127.0.0.1",
+  "--port",
+  ([string]$Port)
+)
+if (-not $NoReload) {
+  $uvicornArgs += "--reload"
+}
+& $VenvPython @uvicornArgs

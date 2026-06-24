@@ -19,12 +19,16 @@ dev = [
   "ruff>=0.8.0",
 ]
 wechat = [
+  "PyYAML>=6.0.0",
+  "requests>=2.31.0",
+  "websockets>=12.0",
   "uiautomation>=2.0.20",
 ]
 
 [project.scripts]
 aipet-bridge = "aipet_bridge.cli:main"
 aipet-wechat-sidecar = "aipet_wechat_sidecar.cli:main"
+aipet-wxauto-bridge-channel = "aipet_wxauto_bridge_channel.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

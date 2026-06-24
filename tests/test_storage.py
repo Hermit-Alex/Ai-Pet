@@ -2,12 +2,17 @@ from __future__ import annotations
 
 import tempfile
 import unittest
+from contextlib import closing
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
+from aipet_bridge.app import create_app
 from aipet_bridge.config import Settings
 from aipet_bridge.models import PetProfile
+from aipet_bridge.openclaw import OpenClawClientError
 from aipet_bridge.service import AipetBridgeService
 from aipet_bridge.storage import SQLiteStore
+from aipet_bridge.wechat import normalize_wechat_settings
 
 
 def make_service(temp_dir: str) -> AipetBridgeService:
@@ -29,7 +34,165 @@ def make_service(temp_dir: str) -> AipetBridgeService:
     return service
 
 
+class FakeOpenClaw:
+    def __init__(self, *, enabled: bool = True, reply: str = "喵 OK", error: str = "") -> None:
+        self.enabled = enabled
+        self.reply = reply
+        self.error = error
+        self.calls: list[dict[str, str]] = []
+
+    def chat(self, *, system_prompt: str, user_prompt: str) -> str:
+        self.calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt})
+        if self.error:
+            raise OpenClawClientError(self.error)
+        return self.reply
+
+
+class SequenceFakeOpenClaw:
+    def __init__(self, replies: list[str]) -> None:
+        self.enabled = True
+        self.replies = list(replies)
+        self.calls: list[dict[str, str]] = []
+
+    def chat(self, *, system_prompt: str, user_prompt: str) -> str:
+        self.calls.append({"system_prompt": system_prompt, "user_prompt": user_prompt})
+        if len(self.replies) > 1:
+            return self.replies.pop(0)
+        return self.replies[0]
+
+
 class BridgeStorageTest(unittest.TestCase):
+    def test_health_reports_wechat_policy_version(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = Settings(
+                api_key=None,
+                data_dir=root,
+                database_path=root / "aipet.sqlite3",
+                logs_dir=root / "logs",
+                default_pet_id="cat-home",
+                default_pet_name="猫咪",
+                home_assistant_url=None,
+                home_assistant_token=None,
+                mqtt_url=None,
+            )
+            app = create_app(settings=settings)
+            health_route = next(route for route in app.routes if getattr(route, "path", "") == "/health")
+
+            payload = health_route.endpoint()
+
+            self.assertEqual(payload["wechat_policy_version"], "2026-06-private-manual-review")
+            self.assertTrue(payload["wechat_private_manual_review_enforced"])
+
+    def test_openclaw_self_test_route_accepts_empty_request(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = Settings(
+                api_key=None,
+                data_dir=root,
+                database_path=root / "aipet.sqlite3",
+                logs_dir=root / "logs",
+                default_pet_id="cat-home",
+                default_pet_name="catbot",
+                home_assistant_url=None,
+                home_assistant_token=None,
+                mqtt_url=None,
+            )
+            app = create_app(settings=settings)
+            route = next(
+                route
+                for route in app.routes
+                if getattr(route, "path", "") == "/pets/{pet_id}/openclaw/self-test"
+            )
+
+            payload = route.endpoint(pet_id="cat-home", request=None)
+
+            self.assertFalse(payload["configured"])
+            self.assertEqual(payload["block_reason"], "openclaw_not_configured")
+
+    def test_openclaw_self_test_reports_openclaw_model_path(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = Settings(
+                api_key=None,
+                data_dir=root,
+                database_path=root / "aipet.sqlite3",
+                logs_dir=root / "logs",
+                default_pet_id="cat-home",
+                default_pet_name="catbot",
+                home_assistant_url=None,
+                home_assistant_token=None,
+                mqtt_url=None,
+                openclaw_base_url="http://127.0.0.1:18789/v1",
+            )
+            fake_openclaw = FakeOpenClaw(reply="喵 OK")
+            service = AipetBridgeService(
+                settings=settings,
+                store=SQLiteStore(settings.database_path),
+                openclaw=fake_openclaw,
+            )
+            service.initialize()
+
+            result = service.test_openclaw_path(pet_id="cat-home", trace_id="trace-openclaw-ok")
+            logs = service.query_logs(
+                trace_id="trace-openclaw-ok",
+                event="bridge.openclaw.self_test.completed",
+            )
+
+            self.assertTrue(result["ok"])
+            self.assertTrue(result["configured"])
+            self.assertEqual(result["model_source"], "openclaw")
+            self.assertEqual(len(fake_openclaw.calls), 1)
+            self.assertEqual(len(logs), 1)
+
+    def test_openclaw_self_test_fails_closed_when_gateway_fails(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = Settings(
+                api_key=None,
+                data_dir=root,
+                database_path=root / "aipet.sqlite3",
+                logs_dir=root / "logs",
+                default_pet_id="cat-home",
+                default_pet_name="catbot",
+                home_assistant_url=None,
+                home_assistant_token=None,
+                mqtt_url=None,
+                openclaw_base_url="http://127.0.0.1:18789/v1",
+            )
+            service = AipetBridgeService(
+                settings=settings,
+                store=SQLiteStore(settings.database_path),
+                openclaw=FakeOpenClaw(error="gateway down"),
+            )
+            service.initialize()
+
+            result = service.test_openclaw_path(pet_id="cat-home", trace_id="trace-openclaw-fail")
+            logs = service.query_logs(
+                trace_id="trace-openclaw-fail",
+                event="bridge.openclaw.self_test.failed",
+            )
+
+            self.assertFalse(result["ok"])
+            self.assertTrue(result["configured"])
+            self.assertEqual(result["model_source"], "local_fallback")
+            self.assertEqual(result["block_reason"], "openclaw_failed")
+            self.assertEqual(len(logs), 1)
+
+    def test_wechat_settings_split_comma_separated_list_items(self) -> None:
+        fullwidth_semicolon = chr(0xFF1B)
+        settings = normalize_wechat_settings(
+            {
+                "private_contact_allowlist": ["爸爸,妈妈", "姐姐"],
+                "family_groups": [f"家庭群，遛猫群{fullwidth_semicolon}阳台群"],
+                "wake_words": "猫咪,喵喵",
+            }
+        )
+
+        self.assertEqual(settings["private_contact_allowlist"], ["爸爸", "妈妈", "姐姐"])
+        self.assertEqual(settings["family_groups"], ["家庭群", "遛猫群", "阳台群"])
+        self.assertEqual(settings["wake_words"], ["猫咪", "喵喵"])
+
     def test_state_uses_recent_pet_events_and_memories_are_searchable(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = make_service(temp_dir)
@@ -73,6 +236,18 @@ class BridgeStorageTest(unittest.TestCase):
             self.assertEqual(len(profile["type_code"]), 5)
             self.assertIn("真实长期使用的宠物微信号", profile["system_prompt"])
             self.assertIn("喵收到", profile["speaking_style"])
+
+    def test_default_cat_home_persona_uses_coco_preset(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = make_service(temp_dir)
+
+            result = service.get_persona("cat-home")
+
+            self.assertEqual(result["profile"]["pet_name"], "CoCo")
+            self.assertEqual(result["profile"]["nickname"], "猫仔")
+            self.assertIn("谨慎独处戏精型有主见护短猫", result["profile"]["type_name"])
+            self.assertIn("你是CoCo", result["system_prompt"])
+            self.assertIn("不做医疗诊断", result["system_prompt"])
 
     def test_wechat_reply_is_blocked_outside_allowlist(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
@@ -171,6 +346,7 @@ class BridgeStorageTest(unittest.TestCase):
                 settings={
                     "private_contact_allowlist": ["老婆", "我"],
                     "private_auto_reply_enabled": True,
+                    "manual_review": False,
                     "quiet_hours_start": "00:00",
                     "quiet_hours_end": "00:00",
                     "private_rate_limit_minutes": 1,
@@ -196,8 +372,207 @@ class BridgeStorageTest(unittest.TestCase):
             self.assertTrue(first["auto_reply_enabled"])
             self.assertFalse(first["requires_manual_review"])
             self.assertEqual(first["model_source"], "local_fallback")
+            self.assertFalse(first["safe_fallback_send_allowed"])
             self.assertFalse(second["should_reply"])
             self.assertEqual(second["block_reason"], "duplicate_message")
+
+    def test_configured_openclaw_failure_allows_safe_private_fallback(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            root = Path(temp_dir)
+            settings = Settings(
+                api_key=None,
+                data_dir=root,
+                database_path=root / "aipet.sqlite3",
+                logs_dir=root / "logs",
+                default_pet_id="cat-home",
+                default_pet_name="CoCo",
+                home_assistant_url=None,
+                home_assistant_token=None,
+                mqtt_url=None,
+                openclaw_base_url="http://127.0.0.1:18789/v1",
+            )
+            service = AipetBridgeService(
+                settings=settings,
+                store=SQLiteStore(settings.database_path),
+                openclaw=FakeOpenClaw(error="gateway hiccup"),
+            )
+            service.initialize()
+            service.save_wechat_settings(
+                pet_id="cat-home",
+                settings={
+                    "private_contact_allowlist": ["dad"],
+                    "private_auto_reply_enabled": True,
+                    "manual_review": False,
+                    "quiet_hours_start": "00:00",
+                    "quiet_hours_end": "00:00",
+                    "private_rate_limit_seconds": 15,
+                    "private_daily_limit": 30,
+                    "max_reply_chars": 120,
+                },
+            )
+
+            result = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="I will be home at 10",
+                message_fingerprint_value="safe-fallback-private",
+            )
+
+            self.assertTrue(result["should_reply"])
+            self.assertEqual(result["model_source"], "local_fallback")
+            self.assertTrue(result["safe_fallback_send_allowed"])
+
+    def test_private_reply_respects_manual_review(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = make_service(temp_dir)
+            service.save_wechat_settings(
+                pet_id="cat-home",
+                settings={
+                    "private_contact_allowlist": ["dad"],
+                    "private_auto_reply_enabled": True,
+                    "manual_review": True,
+                    "quiet_hours_start": "00:00",
+                    "quiet_hours_end": "00:00",
+                    "private_rate_limit_minutes": 1,
+                    "private_daily_limit": 30,
+                    "max_reply_chars": 120,
+                },
+            )
+
+            result = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="manual review should hold private replies",
+                message_fingerprint_value="private-manual-review",
+                trace_id="trace-private-manual",
+            )
+            logs = service.query_logs(
+                trace_id="trace-private-manual",
+                event="wechat.private.reply.generated",
+            )
+
+            self.assertTrue(result["should_reply"])
+            self.assertTrue(result["requires_manual_review"])
+            self.assertTrue(result["auto_reply_enabled"])
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0]["result"], "private_manual_review")
+
+    def test_private_rate_limit_log_uses_request_trace_id(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = make_service(temp_dir)
+            service.save_wechat_settings(
+                pet_id="cat-home",
+                settings={
+                    "private_contact_allowlist": ["dad"],
+                    "private_auto_reply_enabled": True,
+                    "manual_review": False,
+                    "quiet_hours_start": "00:00",
+                    "quiet_hours_end": "00:00",
+                    "private_rate_limit_minutes": 5,
+                    "private_daily_limit": 30,
+                    "max_reply_chars": 120,
+                },
+            )
+
+            first = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="first rate test",
+                message_fingerprint_value="rate-first",
+            )
+            second = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="second rate test",
+                message_fingerprint_value="rate-second",
+                trace_id="trace-rate-limit",
+            )
+            logs = service.query_logs(trace_id="trace-rate-limit", event="bridge.rate_limited")
+
+            self.assertTrue(first["should_reply"])
+            self.assertFalse(second["should_reply"])
+            self.assertEqual(second["block_reason"], "rate_limited")
+            self.assertGreaterEqual(second["retry_after_seconds"], 1)
+            self.assertLessEqual(second["retry_after_seconds"], 300)
+            self.assertEqual(len(logs), 1)
+            self.assertEqual(logs[0]["trace_id"], "trace-rate-limit")
+            self.assertGreaterEqual(logs[0]["retry_after_seconds"], 1)
+
+    def test_private_rate_limit_uses_seconds_window_when_configured(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = make_service(temp_dir)
+            service.save_wechat_settings(
+                pet_id="cat-home",
+                settings={
+                    "private_contact_allowlist": ["dad"],
+                    "private_auto_reply_enabled": True,
+                    "manual_review": False,
+                    "quiet_hours_start": "00:00",
+                    "quiet_hours_end": "00:00",
+                    "private_rate_limit_minutes": 5,
+                    "private_rate_limit_seconds": 5,
+                    "private_daily_limit": 30,
+                    "max_reply_chars": 120,
+                },
+            )
+
+            first = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="first seconds test",
+                message_fingerprint_value="seconds-first",
+            )
+
+            older_than_window = (
+                datetime.now(tz=UTC) - timedelta(seconds=6)
+            ).replace(microsecond=0).isoformat()
+            with closing(service.store.connect()) as conn:
+                conn.execute("UPDATE wechat_reply_record SET created_at = ?", (older_than_window,))
+                conn.commit()
+
+            second = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="second seconds test",
+                message_fingerprint_value="seconds-second",
+            )
+
+            self.assertTrue(first["should_reply"])
+            self.assertTrue(second["should_reply"])
+
+    def test_reply_text_is_summarized_in_audit_logs_by_default(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = make_service(temp_dir)
+            service.save_wechat_settings(
+                pet_id="cat-home",
+                settings={
+                    "private_contact_allowlist": ["dad"],
+                    "private_auto_reply_enabled": True,
+                    "manual_review": False,
+                    "quiet_hours_start": "00:00",
+                    "quiet_hours_end": "00:00",
+                    "private_rate_limit_minutes": 5,
+                    "private_daily_limit": 30,
+                    "max_reply_chars": 120,
+                },
+            )
+
+            result = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="summarize reply log",
+                message_fingerprint_value="summary-log",
+                trace_id="trace-summary-log",
+            )
+            logs = service.query_logs(
+                trace_id="trace-summary-log",
+                event="wechat.private.reply.generated",
+            )
+
+            self.assertTrue(result["should_reply"])
+            self.assertEqual(len(logs), 1)
+            self.assertNotIn("reply_text", logs[0])
+            self.assertIn("reply_text_summary", logs[0])
 
 
 if __name__ == "__main__":

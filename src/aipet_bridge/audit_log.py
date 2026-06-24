@@ -114,7 +114,7 @@ class JsonlAuditLog:
                 lowered = key.lower()
                 if lowered in {"authorization", "api_key", "token", "password", "secret"}:
                     clean[key] = "[redacted]"
-                elif lowered in {"message_text", "full_response", "prompt"} and not self.log_sensitive:
+                elif lowered in {"message_text", "reply_text", "full_response", "prompt"} and not self.log_sensitive:
                     clean[f"{key}_summary"] = summarize_text(str(item))
                 else:
                     clean[key] = self._sanitize(item)

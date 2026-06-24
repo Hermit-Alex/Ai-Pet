@@ -566,6 +566,58 @@ class BridgeStorageTest(unittest.TestCase):
 
             self.assertEqual(count, 1)
 
+    def test_private_daily_limit_is_per_contact(self) -> None:
+        with tempfile.TemporaryDirectory() as temp_dir:
+            service = make_service(temp_dir)
+            service.save_wechat_settings(
+                pet_id="cat-home",
+                settings={
+                    "private_contact_allowlist": ["dad", "mom"],
+                    "private_auto_reply_enabled": True,
+                    "manual_review": False,
+                    "quiet_hours_start": "00:00",
+                    "quiet_hours_end": "00:00",
+                    "private_rate_limit_seconds": 5,
+                    "private_daily_limit": 1,
+                    "max_reply_chars": 120,
+                },
+            )
+
+            dad_first = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="first dad daily test",
+                message_fingerprint_value="dad-daily-first",
+            )
+
+            older_than_rate_window = (
+                datetime.now(tz=UTC) - timedelta(seconds=6)
+            ).replace(microsecond=0).isoformat()
+            with closing(service.store.connect()) as conn:
+                conn.execute(
+                    "UPDATE wechat_reply_record SET created_at = ? WHERE group_name = ?",
+                    (older_than_rate_window, "private:dad"),
+                )
+                conn.commit()
+
+            dad_second = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="dad",
+                message_text="second dad daily test",
+                message_fingerprint_value="dad-daily-second",
+            )
+            mom_first = service.preview_private_reply(
+                pet_id="cat-home",
+                contact_name="mom",
+                message_text="first mom daily test",
+                message_fingerprint_value="mom-daily-first",
+            )
+
+            self.assertTrue(dad_first["should_reply"])
+            self.assertFalse(dad_second["should_reply"])
+            self.assertEqual(dad_second["block_reason"], "private_daily_limit_reached")
+            self.assertTrue(mom_first["should_reply"])
+
     def test_reply_text_is_summarized_in_audit_logs_by_default(self) -> None:
         with tempfile.TemporaryDirectory() as temp_dir:
             service = make_service(temp_dir)

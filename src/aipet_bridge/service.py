@@ -1035,7 +1035,7 @@ class AipetBridgeService:
             }
         today_count = self.store.count_wechat_replies_since(
             pet_id=pet_id,
-            group_name=None,
+            group_name=channel_name,
             since_iso=utc_iso_today_start(),
             statuses=statuses,
         )

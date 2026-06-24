@@ -48,8 +48,8 @@ class ChannelConfig:
     temp_dir: str = "./tmp"
     allowed_message_types: tuple[str, ...] = ("text",)
     require_openclaw_for_send: bool = True
-    private_debounce_seconds: float = 3.0
-    private_batch_max_wait_seconds: float = 8.0
+    private_debounce_seconds: float = 5.0
+    private_batch_max_wait_seconds: float = 12.0
     private_batch_max_messages: int = 8
     private_rate_limited_max_retries: int = 3
     private_rate_limited_fallback_retry_seconds: int = 15
@@ -112,13 +112,13 @@ class ChannelConfig:
             require_openclaw_for_send=_as_bool(data.get("require_openclaw_for_send"), default=True),
             private_debounce_seconds=_bounded_float(
                 data.get("private_debounce_seconds"),
-                default=3.0,
+                default=5.0,
                 minimum=0.0,
                 maximum=30.0,
             ),
             private_batch_max_wait_seconds=_bounded_float(
                 data.get("private_batch_max_wait_seconds"),
-                default=8.0,
+                default=12.0,
                 minimum=0.0,
                 maximum=60.0,
             ),
